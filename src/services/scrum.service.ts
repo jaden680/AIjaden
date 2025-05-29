@@ -2,6 +2,7 @@ import { WebClient } from '@slack/web-api';
 import { google } from 'googleapis';
 import JiraApi from 'jira-client';
 import * as dotenv from 'dotenv';
+import path from 'path';
 
 dotenv.config();
 

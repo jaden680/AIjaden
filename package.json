@@ -27,11 +27,13 @@
   },
   "devDependencies": {
     "@types/cors": "^2.8.18",
-    "@types/express": "^4.17.21",
+    "@types/express": "^4.17.22",
     "@types/jira-client": "^7.1.9",
-    "@types/node": "^20.10.6",
+    "@types/node": "^20.17.52",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "tsc-alias": "^1.8.16",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
   }
 }
