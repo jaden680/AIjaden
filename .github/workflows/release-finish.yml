@@ -1,4 +1,4 @@
-name: Git Flow Release Finish
+name: Git Flow Release Finish Test
 
 on:
   workflow_dispatch:
@@ -29,6 +29,20 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup branches
+        run: |
+          ACTOR="${{ github.actor }}"
+          git config user.name "$ACTOR"
+          git config user.email "${ACTOR}@users.noreply.github.com"
+            
+            # 모든 브랜치 가져오기
+            git fetch --all
+            
+            # develop 브랜치가 없으면 원격에서 가져오기
+            if ! git show-ref --verify --quiet refs/heads/develop; then
+              git checkout -b develop origin/develop
+            fi
 
       - name: 👤 Set up Git identity
         run: |
@@ -69,8 +83,8 @@ jobs:
 
       - name: 🚀 Initialize Git Flow
         run: |
-          DEVELOP_BRANCH="${{ github.event.inputs.develop_branch }}"
-          MAIN_BRANCH="${{ github.event.inputs.main_branch }}"
+          DEVELOP_BRANCH="develop"
+          MAIN_BRANCH="main"
           VERSION="${{ github.event.inputs.release_version }}"
           
           echo "📦 Using version: $VERSION"
