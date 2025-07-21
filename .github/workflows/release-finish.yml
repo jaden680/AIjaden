@@ -1,0 +1,43 @@
+name: Git Flow Release Finish
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (e.g. v1.2.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  finish-release:
+    runs-on: self-hosted
+
+    steps:
+      - name: gitflow-workflow-action release workflows
+        uses: hoangvvo/gitflow-workflow-action@v1.0.0
+        with:
+          develop_branch: "develop"
+          main_branch: "main"
+          merge_back_from_main: false
+          version: ${{ inputs.release_version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post to a Slack channel
+        if: success()
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              🎉 [릴리스 완료 알림]
+              
+              *버전:* `${{ inputs.release_version }}`
+              
+              🔗 <https://github.com/${{ github.repository }}/releases|GitHub 릴리스 페이지>
+              📦 <https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_version }}|이번 릴리스 보기>  
+      
