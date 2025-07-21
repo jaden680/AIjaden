@@ -12,19 +12,198 @@ permissions:
 
 jobs:
   finish-release:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
 
     steps:
-      - name: gitflow-workflow-action release workflows
-        uses: hoangvvo/gitflow-workflow-action@v1.0.0
-        with:
-          develop_branch: "develop"
-          main_branch: "main"
-          merge_back_from_main: false
-          version: ${{ inputs.release_version }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: ✅ Validate release version format
+        run: |
+          VERSION="${{ github.event.inputs.release_version }}"
+          if [[ ! "$VERSION" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "🔒 Version must follow semantic versioning (e.g. 1.2.3 or v1.2.3)"
+            exit 1
+          fi
 
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 👤 Set up Git identity
+        run: |
+          ACTOR="${{ github.actor }}"
+          git config user.name "$ACTOR"
+          git config user.email "${ACTOR}@users.noreply.github.com"
+          git config core.editor "true"
+
+      - name: 🔧 Install Git Flow (if needed)
+        run: |
+          # Git Flow 설치 확인 및 설치
+          if ! command -v git-flow &> /dev/null; then
+            echo "📦 Git Flow not found. Installing..."
+            
+            # OS 확인 및 설치
+            if command -v apt-get &> /dev/null; then
+              # Ubuntu/Debian
+              sudo apt-get update
+              sudo apt-get install -y git-flow
+            elif command -v yum &> /dev/null; then
+              # CentOS/RHEL
+              sudo yum install -y git-flow
+            elif command -v brew &> /dev/null; then
+              # macOS
+              brew install git-flow
+            else
+              echo "❌ Unsupported OS. Please install git-flow manually."
+              exit 1
+            fi
+            
+            echo "✅ Git Flow installed successfully"
+          else
+            echo "✅ Git Flow is already installed"
+          fi
+          
+          # Git Flow 버전 확인
+          git-flow version
+
+      - name: 🚀 Initialize Git Flow
+        run: |
+          DEVELOP_BRANCH="${{ github.event.inputs.develop_branch }}"
+          MAIN_BRANCH="${{ github.event.inputs.main_branch }}"
+          VERSION="${{ github.event.inputs.release_version }}"
+          
+          echo "📦 Using version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+          echo "🔄 Fetching latest changes..."
+          git fetch origin
+          
+          # Git Flow 초기화 상태 확인
+          if ! git config --get gitflow.branch.master &>/dev/null || ! git flow version &>/dev/null; then
+            echo "🔧 Git Flow not initialized. Initializing..."
+            
+            # Git Flow 설정
+            git config gitflow.branch.master "$MAIN_BRANCH"
+            git config gitflow.branch.develop "$DEVELOP_BRANCH"
+            git config gitflow.prefix.feature "feature/"
+            git config gitflow.prefix.release "release/"
+            git config gitflow.prefix.hotfix "hotfix/"
+            git config gitflow.prefix.support "support/"
+            git config gitflow.prefix.versiontag ""
+            
+            # Git Flow 초기화 실행
+            git flow init -d
+            
+            echo "✅ Git Flow initialized successfully"
+          else
+            echo "✅ Git Flow is already initialized"
+          fi
+          
+          echo "🔍 Current Git Flow configuration:"
+          echo "  Master branch: $(git config --get gitflow.branch.master)"
+          echo "  Develop branch: $(git config --get gitflow.branch.develop)"
+          echo "  Release prefix: $(git config --get gitflow.prefix.release)"
+
+      - name: 🔍 Validate release branch exists
+        run: |
+          RELEASE_BRANCH="release/$VERSION"
+          
+          git fetch origin
+          
+          if ! git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
+            echo "❌ Release branch '$RELEASE_BRANCH' does not exist on remote"
+            exit 1
+          fi
+          
+          echo "✅ Release branch '$RELEASE_BRANCH' found"
+
+      - name: 🧪 Dry run validation
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          DEVELOP_BRANCH="${{ github.event.inputs.develop_branch }}"
+          MAIN_BRANCH="${{ github.event.inputs.main_branch }}"
+          RELEASE_BRANCH="release/$VERSION"
+          
+          echo "🧪 DRY RUN: Validating Git Flow release finish..."
+          
+          # 태그 중복 검사
+          if git tag -l | grep -q "^$VERSION$"; then
+            echo "❌ Tag '$VERSION' already exists"
+            exit 1
+          fi
+          
+          # 병합 충돌 검사
+          echo "🔍 Checking merge conflicts..."
+          
+          # develop 브랜치로 병합 테스트
+          git checkout $DEVELOP_BRANCH
+          git pull origin $DEVELOP_BRANCH
+          if ! git merge --no-commit --no-ff "origin/$RELEASE_BRANCH" &>/dev/null; then
+            echo "❌ Merge conflict detected with $DEVELOP_BRANCH"
+            git merge --abort 2>/dev/null || true
+            exit 1
+          fi
+          git reset --hard HEAD
+          
+          # main 브랜치로 병합 테스트  
+          git checkout $MAIN_BRANCH
+          git pull origin $MAIN_BRANCH
+          if ! git merge --no-commit --no-ff "origin/$RELEASE_BRANCH" &>/dev/null; then
+            echo "❌ Merge conflict detected with $MAIN_BRANCH"
+            git merge --abort 2>/dev/null || true
+            exit 1
+          fi
+          git reset --hard HEAD
+          
+          echo "✅ DRY RUN: All validations passed"
+          echo "📋 Would execute: git flow release finish $VERSION"
+
+      - name: 🏁 Finish release with Git Flow
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          DEVELOP_BRANCH="${{ github.event.inputs.develop_branch }}"
+          MAIN_BRANCH="${{ github.event.inputs.main_branch }}"
+          RELEASE_BRANCH="release/$VERSION"
+          
+          echo "🚀 Starting Git Flow release finish for version $VERSION..."
+          
+          # release 브랜치로 체크아웃
+          git checkout "$RELEASE_BRANCH"
+          git pull origin "$RELEASE_BRANCH"
+          
+          # Git Flow release finish 실행
+          # -m: 태그 메시지, -p: push, -D: release 브랜치 삭제
+          git flow release finish -m "Release $VERSION" -p -D "$VERSION"
+          
+          # 특정 태그 푸시
+          echo "🏷 Pushing tag $VERSION..."
+          if git tag -l | grep -q "^$VERSION$"; then
+            git push origin "$VERSION"
+            echo "✅ Tag $VERSION pushed successfully"
+          else
+            echo "❌ Tag $VERSION not found locally"
+            exit 1
+          fi
+          
+          echo "✅ Git Flow release finish completed successfully!"
+          echo "📋 Actions performed:"
+          echo "  - Merged $RELEASE_BRANCH into $DEVELOP_BRANCH"
+          echo "  - Merged $RELEASE_BRANCH into $MAIN_BRANCH"
+          echo "  - Created tag: $VERSION"
+          echo "  - Pushed tag: $VERSION"
+          echo "  - Deleted release branch: $RELEASE_BRANCH"
+          echo "  - Pushed all changes to remote"
+
+      - name: 📊 Summary
+        run: |
+          if [[ "${{ github.event.inputs.dry_run }}" == "true" ]]; then
+            echo "🧪 DRY RUN completed for release $VERSION"
+          else
+            echo "🎉 Release $VERSION finished successfully!"
+            echo "🏷 Tag created: $VERSION"
+            echo "🔗 Check the releases page: https://github.com/${{ github.repository }}/releases"
+          fi
       - name: Post to a Slack channel
         if: success()
         uses: slackapi/slack-github-action@v2.0.0
@@ -32,12 +211,21 @@ jobs:
           webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
           webhook-type: incoming-webhook
           payload: |
-            channel: ${{ secrets.SLACK_CHANNEL_ID }}
-            text: >
+            text: |
               🎉 [릴리스 완료 알림]
-              
+
               *버전:* `${{ inputs.release_version }}`
-              
+
               🔗 <https://github.com/${{ github.repository }}/releases|GitHub 릴리스 페이지>
-              📦 <https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_version }}|이번 릴리스 보기>  
-      
+              📦 <https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_version }}|이번 릴리스 보기>
+            blocks:
+              - type: "section"
+                text:
+                  type: "mrkdwn"
+                  text: |
+                    🎉 [릴리스 완료 알림]
+
+                    *버전:* `${{ inputs.release_version }}`
+
+                    🔗 <https://github.com/${{ github.repository }}/releases|GitHub 릴리스 페이지>
+                    📦 <https://github.com/${{ github.repository }}/releases/tag/${{ inputs.release_version }}|이번 릴리스 보기> 
